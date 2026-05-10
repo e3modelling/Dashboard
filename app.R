@@ -15,6 +15,7 @@ library(networkD3)
 library(leaflet)
 library(DT)
 library(scales)
+library(shinycssloaders)
 
 SCRIPT_DIR <- tryCatch(
   dirname(rstudioapi::getActiveDocumentContext()$path),
@@ -376,6 +377,19 @@ ui <- bs4DashPage(
   help        = FALSE,
   scrollToTop = TRUE,
 
+  controlbar = bs4DashControlbar(
+    skin = "dark",
+    title = "App Settings",
+    width = 300,
+    pinned = FALSE,
+    bs4Card(
+      title = "Global Preferences",
+      width = 12,
+      elevation = 0,
+      sliderInput("global_yr", "Default Year Range", 2010, 2100, c(2020, 2060), step = 1, sep = "")
+    )
+  ),
+
   header = bs4DashNavbar(
     skin  = "dark",
     title = bs4DashBrand(
@@ -444,8 +458,10 @@ ui <- bs4DashPage(
           bs4Card(width = 6, title = "Primary Energy Mix",   maximizable = TRUE, collapsible = FALSE, plotlyOutput("plot_ov_pe", height = "300px"))
         ),
         fluidRow(
-          bs4Card(width = 6, title = "Electricity Mix",      maximizable = TRUE, collapsible = FALSE, plotlyOutput("plot_ov_se", height = "300px")),
-          bs4Card(width = 6, title = "Final Energy (Sector)",maximizable = TRUE, collapsible = FALSE, plotlyOutput("plot_ov_fe", height = "300px"))
+          bs4TabCard(width = 12, title = "Energy Mix Breakdown", maximizable = TRUE, collapsible = FALSE, status = "primary",
+            tabPanel("Electricity", plotlyOutput("plot_ov_se", height = "300px")),
+            tabPanel("Final Energy (Sector)", plotlyOutput("plot_ov_fe", height = "300px"))
+          )
         )
       ),
 
@@ -459,7 +475,7 @@ ui <- bs4DashPage(
         fluidRow(
           bs4ValueBox(textOutput("rd_vb_co2"), "CO2 Emissions",   icon("smog"),            color = "danger",  width = 3, footer = "end-year"),
           bs4ValueBox(textOutput("rd_vb_pe"),  "Primary Energy",  icon("bolt"),            color = "primary", width = 3, footer = "end-year"),
-          bs4ValueBox(textOutput("rd_vb_ren"), "Renewable Elec.", icon("leaf"),            color = "success", width = 3, footer = "share"),
+          bs4ValueBoxOutput("rd_vb_ren", width = 3),
           bs4ValueBox(textOutput("rd_vb_cap"), "Power Capacity",  icon("tower-broadcast"), color = "info",    width = 3, footer = "end-year GW")
         ),
         fluidRow(
@@ -472,7 +488,9 @@ ui <- bs4DashPage(
         ),
         fluidRow(
           bs4Card(width = 6, title = "Power Capacity",         maximizable = TRUE, collapsible = FALSE, plotlyOutput("rd_cap", height = "260px")),
-          bs4Card(width = 6, title = "Key Indicators",         maximizable = TRUE, collapsible = FALSE, plotlyOutput("rd_ind", height = "260px"))
+          bs4Card(width = 6, title = "Key Indicators",         maximizable = TRUE, collapsible = FALSE, 
+                  ribbon = bs4Ribbon(text = "Updated", color = "teal"),
+                  plotlyOutput("rd_ind", height = "260px"))
         )
       ),
 
@@ -555,7 +573,7 @@ ui <- bs4DashPage(
         ),
         fluidRow(
           bs4Card(width = 12, title = "Primary → Final Energy Flows", maximizable = TRUE, collapsible = FALSE,
-                  sankeyNetworkOutput("plot_sk", height = "500px"))
+                  shinycssloaders::withSpinner(sankeyNetworkOutput("plot_sk", height = "500px"), type = 8, color = "#2A9D8F"))
         )
       ),
 
@@ -735,12 +753,22 @@ server <- function(input, output, session) {
       pull(value) %>% sum(na.rm = TRUE)
     if (!length(val) || is.na(val)) "N/A" else paste0(round(val, 1))
   })
-  output$vb_ren <- renderText({
+  output$vb_ren <- renderbs4ValueBox({
     d <- dat(); req(input$ov_sc, input$ov_reg, input$ov_yr)
     df <- d$secondary_elec %>%
       filter(scenario == input$ov_sc, region %in% input$ov_reg, year == input$ov_yr[2])
     tot <- sum(df$value, na.rm = TRUE); ren <- sum(df$value[df$source %in% REN_SOURCES], na.rm = TRUE)
-    if (!tot || is.na(tot)) "N/A" else paste0(round(100 * ren / tot, 1), "%")
+    val_pct <- if (!tot || is.na(tot)) 0 else round(100 * ren / tot, 1)
+    val_text <- if (!tot || is.na(tot)) "N/A" else paste0(val_pct, "%")
+    
+    bs4ValueBox(
+      value = val_text,
+      subtitle = "Renewable Elec.",
+      icon = icon("leaf"),
+      color = "success",
+      footer = "share of electricity",
+      width = NULL
+    )
   })
   output$vb_cap <- renderText({
     d <- dat(); req(input$ov_sc, input$ov_reg, input$ov_yr)
@@ -818,12 +846,22 @@ server <- function(input, output, session) {
       pull(value) %>% sum(na.rm = TRUE)
     if (!length(val) || is.na(val)) "N/A" else paste0(round(val, 1))
   })
-  output$rd_vb_ren <- renderText({
+  output$rd_vb_ren <- renderbs4ValueBox({
     d <- dat(); req(input$rd_sc, input$rd_reg, input$rd_yr)
     df <- d$secondary_elec %>%
       filter(scenario == input$rd_sc, region == input$rd_reg, year == input$rd_yr[2])
     tot <- sum(df$value, na.rm = TRUE); ren <- sum(df$value[df$source %in% REN_SOURCES], na.rm = TRUE)
-    if (!tot || is.na(tot)) "N/A" else paste0(round(100 * ren / tot, 1), "%")
+    val_pct <- if (!tot || is.na(tot)) 0 else round(100 * ren / tot, 1)
+    val_text <- if (!tot || is.na(tot)) "N/A" else paste0(val_pct, "%")
+    
+    bs4ValueBox(
+      value = val_text,
+      subtitle = "Renewable Elec.",
+      icon = icon("leaf"),
+      color = "success",
+      footer = "share",
+      width = NULL
+    )
   })
   output$rd_vb_cap <- renderText({
     d <- dat(); req(input$rd_sc, input$rd_reg, input$rd_yr)
@@ -1134,6 +1172,13 @@ server <- function(input, output, session) {
       group_by(source, target) %>%
       summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
       filter(value > 0)
+    if (nrow(df) == 0) {
+      toast(
+        title = "No Data Found",
+        body = "Try selecting a different scenario or region.",
+        options = list(class = "bg-warning", autohide = TRUE, delay = 3000)
+      )
+    }
     validate(need(nrow(df) > 0, "No flow data."))
     nodes   <- data.frame(name = unique(c(df$source, df$target)))
     df$s_id <- match(df$source, nodes$name) - 1
