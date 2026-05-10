@@ -209,6 +209,24 @@ APP_DATA <- local({
 # COLOUR PALETTES & CHART THEMES
 # =============================================================================
 
+DASH_COLORS <- list(
+  shell       = "#0B1118",
+  sidebar    = "#101923",
+  page        = "#E9EDF3",
+  surface     = "#F7F9FC",
+  surface_alt = "#EEF3F8",
+  border      = "#D8E0EA",
+  text        = "#182230",
+  muted       = "#617083",
+  grid        = "#DCE4ED",
+  accent      = "#1F9A8A",
+  accent_dark = "#126E67",
+  danger      = "#C2414B",
+  energy      = "#2364AA",
+  renew       = "#2F855A",
+  capacity    = "#4C6FFF"
+)
+
 FUEL_COLS <- c(
   "Coal" = "#3d3d3d", "Lignite" = "#555555",
   "Oil" = "#6B4226", "Crude Oil and Feedstocks" = "#7a5230",
@@ -236,40 +254,52 @@ TECH_COLS <- c(
 )
 
 dtheme <- function() {
-  theme_minimal(base_family = "sans") +
+  theme_minimal(base_family = "Inter, Segoe UI, Arial, sans-serif", base_size = 11) +
   theme(
     plot.background   = element_rect(fill = "transparent", colour = NA),
     panel.background  = element_rect(fill = "transparent", colour = NA),
-    text              = element_text(colour = "#E8EAF0"),
-    axis.text         = element_text(colour = "#9a9db0"),
-    strip.text        = element_text(colour = "#2A9D8F", face = "bold"),
-    panel.grid.major  = element_line(colour = "#2a2d3a"),
+    text              = element_text(colour = DASH_COLORS$text),
+    plot.title        = element_text(face = "bold", size = 12, colour = DASH_COLORS$text),
+    axis.title        = element_text(size = 9, colour = DASH_COLORS$muted),
+    axis.text         = element_text(size = 9, colour = DASH_COLORS$muted),
+    strip.background  = element_rect(fill = DASH_COLORS$surface_alt, colour = NA),
+    strip.text        = element_text(colour = DASH_COLORS$accent_dark, face = "bold", size = 9),
+    panel.grid.major  = element_line(colour = DASH_COLORS$grid, linewidth = 0.35),
     panel.grid.minor  = element_blank(),
     legend.position   = "top",
+    legend.justification = "left",
+    legend.title      = element_blank(),
+    legend.text       = element_text(size = 8, colour = DASH_COLORS$muted),
     legend.background = element_rect(fill = "transparent", colour = NA),
-    legend.key        = element_rect(fill = "transparent", colour = NA)
+    legend.key        = element_rect(fill = "transparent", colour = NA),
+    plot.margin       = margin(8, 14, 10, 10)
   )
 }
 
 dtheme_sm <- function() {
   dtheme() + theme(
     legend.position = "right",
-    legend.key.size = unit(0.32, "cm"),
-    legend.text     = element_text(size = 7),
-    axis.text       = element_text(size = 7),
-    plot.margin     = margin(2, 2, 2, 2)
+    legend.key.size = unit(0.28, "cm"),
+    legend.text     = element_text(size = 7.5),
+    axis.text       = element_text(size = 7.5),
+    strip.text      = element_text(size = 7.5),
+    plot.margin     = margin(4, 6, 6, 6)
   )
 }
 
 ptheme <- function(p) {
   p %>% layout(
     paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)",
-    font   = list(color = "#E8EAF0", family = "sans"),
-    xaxis  = list(gridcolor = "#2a2d3a", zerolinecolor = "#2a2d3a"),
-    yaxis  = list(gridcolor = "#2a2d3a", zerolinecolor = "#2a2d3a"),
-    legend = list(bgcolor = "rgba(22,24,32,0.8)", bordercolor = "#2a2d3a", borderwidth = 1),
-    margin = list(t = 20, b = 40, l = 60, r = 20)
-  )
+    font   = list(color = DASH_COLORS$text, family = "Inter, Segoe UI, Arial, sans-serif", size = 11),
+    xaxis  = list(gridcolor = DASH_COLORS$grid, zerolinecolor = DASH_COLORS$grid,
+                  linecolor = DASH_COLORS$border, tickcolor = DASH_COLORS$border),
+    yaxis  = list(gridcolor = DASH_COLORS$grid, zerolinecolor = DASH_COLORS$grid,
+                  linecolor = DASH_COLORS$border, tickcolor = DASH_COLORS$border),
+    legend = list(orientation = "h", x = 0, y = 1.08, bgcolor = "rgba(247,249,252,0.92)",
+                  bordercolor = DASH_COLORS$border, borderwidth = 1, font = list(size = 10)),
+    margin = list(t = 34, b = 48, l = 64, r = 24)
+  ) %>%
+    config(displaylogo = FALSE, modeBarButtonsToRemove = c("lasso2d", "select2d"))
 }
 
 # =============================================================================
@@ -278,19 +308,19 @@ ptheme <- function(p) {
 
 app_theme <- create_theme(
   adminlte_color(
-    light_blue = "#2A9D8F",
-    teal       = "#2A9D8F"
+    light_blue = DASH_COLORS$accent,
+    teal       = DASH_COLORS$accent
   ),
   adminlte_sidebar(
-    dark_bg          = "#161820",
-    dark_hover_bg    = "#1e2130",
-    dark_color       = "#9a9db0",
-    dark_hover_color = "#E8EAF0"
+    dark_bg          = DASH_COLORS$sidebar,
+    dark_hover_bg    = "#172636",
+    dark_color       = "#AAB7C6",
+    dark_hover_color = "#F7FAFC"
   ),
   adminlte_global(
-    content_bg = "#0F1117",
-    box_bg     = "#161820",
-    info_box_bg = "#161820"
+    content_bg = DASH_COLORS$page,
+    box_bg     = DASH_COLORS$surface,
+    info_box_bg = DASH_COLORS$surface
   )
 )
 
@@ -298,14 +328,39 @@ app_theme <- create_theme(
 ysl <- function(id, lo = 2020, hi = 2060)
   sliderInput(id, NULL, 2010, 2100, c(lo, hi), step = 1, sep = "", width = "100%")
 
+# Helper: clean KPI card for the overview and regional dashboard.
+metric_card <- function(output_id, title, unit, icon_name, accent, width = 3, footer = NULL) {
+  column(
+    width,
+    tags$div(
+      class = "metric-card",
+      style = paste0("--accent:", accent, ";"),
+      tags$div(
+        class = "metric-topline",
+        tags$span(class = "metric-title", title),
+        tags$span(class = "metric-icon", icon(icon_name))
+      ),
+      tags$div(
+        class = "metric-value-row",
+        tags$span(class = "metric-value", textOutput(output_id, inline = TRUE)),
+        tags$span(class = "metric-unit", unit)
+      ),
+      tags$div(class = "metric-footer", footer)
+    )
+  )
+}
+
 # Helper: collapsible filter card that spans full width
 frow <- function(...) {
   fluidRow(
-    bs4Card(
-      width = 12, title = tagList(icon("sliders"), " Filters"),
-      status = "primary", solidHeader = FALSE,
-      collapsible = TRUE, collapsed = FALSE, elevation = 1,
-      ...
+    tags$div(
+      class = "filter-card-wrap",
+      bs4Card(
+        width = 12, title = tagList(icon("sliders"), " Filters"),
+        status = "primary", solidHeader = FALSE,
+        collapsible = TRUE, collapsed = FALSE, elevation = 0,
+        fluidRow(class = "filter-grid", ...)
+      )
     )
   )
 }
@@ -315,55 +370,214 @@ frow <- function(...) {
 # =============================================================================
 
 CUSTOM_CSS <- tags$style(HTML("
-  /* Body & sidebar */
-  body, .wrapper { background-color: #0F1117 !important; }
-  .main-sidebar  { background-color: #161820 !important; }
-  .sidebar-menu > li.header {
-    color: #2A9D8F !important;
-    font-size: 0.68rem !important;
-    letter-spacing: .08em;
-    padding: 10px 10px 4px;
+  :root {
+    --dash-shell: #0B1118;
+    --dash-sidebar: #101923;
+    --dash-page: #E9EDF3;
+    --dash-surface: #F7F9FC;
+    --dash-surface-alt: #EEF3F8;
+    --dash-border: #D8E0EA;
+    --dash-text: #182230;
+    --dash-muted: #617083;
+    --dash-accent: #1F9A8A;
   }
-  /* Cards */
-  .card { background-color: #161820 !important; border: 1px solid #2a2d3a !important; }
-  .card-header { background-color: #1a1d2e !important; border-bottom: 1px solid #2a2d3a !important;
-                 color: #E8EAF0 !important; font-size: .82rem; }
-  .card-body { background-color: #161820 !important; }
-  /* Value boxes */
-  .small-box { border-radius: 6px !important; }
-  .small-box h3 { font-size: 1.6rem !important; }
-  /* Navbar */
-  .main-header .navbar { background-color: #0F1117 !important; border-bottom: 1px solid #2a2d3a; }
-  .main-header .brand-link { background-color: #161820 !important;
-    border-bottom: 1px solid #2a2d3a !important; font-size: .95rem; }
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: #0F1117; }
-  ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
-  /* Select inputs */
-  .selectize-control .selectize-input { background: #1a1d2e !important;
-    border-color: #2a2d3a !important; color: #E8EAF0 !important; }
-  .selectize-dropdown { background: #1a1d2e !important; border-color: #2a2d3a !important; }
-  .selectize-dropdown .option { color: #E8EAF0 !important; }
+  body, .wrapper { background: var(--dash-page) !important; color: var(--dash-text); }
+  body { font-family: Inter, 'Segoe UI', Arial, sans-serif; }
+  .content-wrapper {
+    background: linear-gradient(180deg, #F1F5F9 0%, var(--dash-page) 36%, #E5EBF2 100%) !important;
+    padding: 18px 20px 24px;
+  }
+  .main-sidebar { background: var(--dash-sidebar) !important; box-shadow: 12px 0 34px rgba(11,17,24,.14); }
+  .main-header .navbar {
+    background: rgba(11,17,24,.98) !important;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    min-height: 56px;
+  }
+  .main-header .brand-link {
+    background: var(--dash-sidebar) !important;
+    border-bottom: 1px solid rgba(255,255,255,.08) !important;
+    min-height: 56px;
+    font-size: .95rem;
+  }
+  .brand-text, .main-header .brand-link span { letter-spacing: .02em; }
+  .nav-sidebar .nav-link {
+    border-radius: 8px;
+    margin: 2px 10px;
+    color: #AAB7C6 !important;
+  }
+  .nav-sidebar .nav-link.active,
+  .nav-sidebar .nav-link:hover {
+    background: rgba(31,154,138,.16) !important;
+    color: #F7FAFC !important;
+  }
+  .nav-sidebar .nav-link.active { box-shadow: inset 3px 0 0 var(--dash-accent); }
+  .sidebar-menu > li.header,
+  .nav-sidebar .nav-header {
+    color: #63D2C2 !important;
+    font-size: .66rem !important;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    padding: 16px 16px 6px;
+  }
+  .card {
+    background: var(--dash-surface) !important;
+    border: 1px solid var(--dash-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 14px 30px rgba(22,34,51,.08) !important;
+    color: var(--dash-text);
+    overflow: hidden;
+  }
+  .card-header {
+    background: linear-gradient(180deg, #FFFFFF 0%, #F3F6FA 100%) !important;
+    border-bottom: 1px solid var(--dash-border) !important;
+    color: var(--dash-text) !important;
+    font-size: .82rem;
+    font-weight: 700;
+    letter-spacing: .01em;
+    min-height: 42px;
+  }
+  .card-title { color: var(--dash-text) !important; font-weight: 700 !important; }
+  .card-body { background: var(--dash-surface) !important; padding: 14px 16px 16px; }
+  .filter-card-wrap .card {
+    background: rgba(247,249,252,.94) !important;
+    box-shadow: 0 10px 24px rgba(22,34,51,.06) !important;
+  }
+  .filter-card-wrap .card-header {
+    min-height: 38px;
+    background: #FFFFFF !important;
+  }
+  .filter-card-wrap .card-body { padding: 12px 14px 6px; }
+  .filter-grid .form-group { margin-bottom: 8px; }
+  label, .control-label {
+    color: var(--dash-muted) !important;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .selectize-control .selectize-input,
+  .form-control {
+    background: #FFFFFF !important;
+    border: 1px solid #CDD6E1 !important;
+    border-radius: 7px !important;
+    color: var(--dash-text) !important;
+    min-height: 38px;
+    box-shadow: none !important;
+  }
+  .selectize-control.multi .selectize-input > div {
+    background: #E6F4F2 !important;
+    border: 1px solid #B8E0DA !important;
+    color: #126E67 !important;
+    border-radius: 999px;
+  }
+  .selectize-dropdown {
+    background: #FFFFFF !important;
+    border-color: #CDD6E1 !important;
+    color: var(--dash-text) !important;
+    box-shadow: 0 18px 38px rgba(22,34,51,.18);
+  }
+  .selectize-dropdown .option { color: var(--dash-text) !important; }
   .selectize-dropdown .option:hover,
-  .selectize-dropdown .active { background: #2a2d3a !important; }
-  /* Sliders */
-  .irs--shiny .irs-bar { background: #2A9D8F !important; border-color: #2A9D8F !important; }
-  .irs--shiny .irs-handle { background: #2A9D8F !important; border-color: #2A9D8F !important; }
+  .selectize-dropdown .active { background: #EAF3F2 !important; color: #126E67 !important; }
+  .irs--shiny .irs-line { background: #DDE5EE !important; border-color: #DDE5EE !important; }
+  .irs--shiny .irs-bar,
+  .irs--shiny .irs-handle {
+    background: var(--dash-accent) !important;
+    border-color: var(--dash-accent) !important;
+  }
   .irs--shiny .irs-from, .irs--shiny .irs-to, .irs--shiny .irs-single {
-    background: #2A9D8F !important; }
-  /* Table */
-  .dataTables_wrapper { color: #E8EAF0 !important; }
-  table.dataTable thead th { background: #1a1d2e !important; color: #2A9D8F !important;
-    border-bottom: 1px solid #2a2d3a !important; }
-  table.dataTable tbody tr { background: #161820 !important; color: #E8EAF0 !important; }
-  table.dataTable tbody tr:hover { background: #1e2130 !important; }
-  /* Checkbox */
-  .checkbox label { color: #9a9db0 !important; }
-  /* Radio */
-  .radio label { color: #9a9db0 !important; }
-  /* Content padding */
-  .content-wrapper { padding: 12px; }
+    background: var(--dash-accent) !important;
+  }
+  .metric-card {
+    --accent: var(--dash-accent);
+    background: linear-gradient(180deg, #FFFFFF 0%, #F6F8FB 100%);
+    border: 1px solid var(--dash-border);
+    border-top: 3px solid var(--accent);
+    border-radius: 8px;
+    box-shadow: 0 12px 26px rgba(22,34,51,.08);
+    min-height: 124px;
+    padding: 16px 18px 14px;
+    margin-bottom: 16px;
+  }
+  .metric-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .metric-title {
+    color: var(--dash-muted);
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .metric-icon {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, white);
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    width: 32px;
+  }
+  .metric-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .metric-value {
+    color: var(--dash-text);
+    font-size: clamp(1.5rem, 2vw, 2.15rem);
+    font-weight: 800;
+    line-height: 1;
+  }
+  .metric-value .shiny-text-output { display: inline; }
+  .metric-unit {
+    color: var(--dash-muted);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  .metric-footer {
+    border-top: 1px solid #E5EBF2;
+    color: var(--dash-muted);
+    font-size: .76rem;
+    margin-top: 14px;
+    padding-top: 9px;
+  }
+  .plotly, .leaflet, .html-widget { color: var(--dash-text); }
+  .dataTables_wrapper { color: var(--dash-text) !important; }
+  .dataTables_wrapper .dt-buttons .btn,
+  .dataTables_wrapper .dataTables_paginate .paginate_button {
+    background: #FFFFFF !important;
+    border: 1px solid #CDD6E1 !important;
+    border-radius: 6px !important;
+    color: var(--dash-text) !important;
+    margin-right: 4px;
+  }
+  table.dataTable thead th {
+    background: #EEF3F8 !important;
+    color: #126E67 !important;
+    border-bottom: 1px solid var(--dash-border) !important;
+  }
+  table.dataTable tbody tr { background: #FFFFFF !important; color: var(--dash-text) !important; }
+  table.dataTable tbody tr:hover { background: #F0F7F6 !important; }
+  .checkbox label, .radio label {
+    color: var(--dash-muted) !important;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: .82rem;
+  }
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: #DDE5EE; }
+  ::-webkit-scrollbar-thumb { background: #9AAABD; border-radius: 8px; }
+  @media (max-width: 991px) {
+    .content-wrapper { padding: 12px; }
+    .metric-card { min-height: 112px; }
+  }
 "))
 
 # =============================================================================
@@ -448,10 +662,10 @@ ui <- bs4DashPage(
           column(5, ysl("ov_yr"))
         ),
         fluidRow(
-          bs4ValueBox(textOutput("vb_em"),  "CO2 Emissions",    icon("smog"),            color = "danger",  width = 3, footer = "end-year sum"),
-          bs4ValueBox(textOutput("vb_pe"),  "Primary Energy",   icon("bolt"),            color = "primary", width = 3, footer = "end-year sum"),
-          bs4ValueBox(textOutput("vb_ren"), "Renewable Elec.",  icon("leaf"),            color = "success", width = 3, footer = "share of electricity"),
-          bs4ValueBox(textOutput("vb_cap"), "Power Capacity",   icon("tower-broadcast"), color = "info",    width = 3, footer = "end-year total GW")
+          metric_card("vb_em",  "CO2 Emissions",   "Mt CO2", "smog",            DASH_COLORS$danger,   footer = "End-year sum"),
+          metric_card("vb_pe",  "Primary Energy",  "EJ",     "bolt",            DASH_COLORS$energy,   footer = "End-year sum"),
+          metric_card("vb_ren", "Renewable Elec.", "%",      "leaf",            DASH_COLORS$renew,    footer = "Share of electricity"),
+          metric_card("vb_cap", "Power Capacity",  "GW",     "tower-broadcast", DASH_COLORS$capacity, footer = "End-year total")
         ),
         fluidRow(
           bs4Card(width = 6, title = "CO2 Emissions",        maximizable = TRUE, collapsible = FALSE, plotlyOutput("plot_ov_em", height = "300px")),
@@ -473,10 +687,10 @@ ui <- bs4DashPage(
           column(5, ysl("rd_yr"))
         ),
         fluidRow(
-          bs4ValueBox(textOutput("rd_vb_co2"), "CO2 Emissions",   icon("smog"),            color = "danger",  width = 3, footer = "end-year"),
-          bs4ValueBox(textOutput("rd_vb_pe"),  "Primary Energy",  icon("bolt"),            color = "primary", width = 3, footer = "end-year"),
-          bs4ValueBoxOutput("rd_vb_ren", width = 3),
-          bs4ValueBox(textOutput("rd_vb_cap"), "Power Capacity",  icon("tower-broadcast"), color = "info",    width = 3, footer = "end-year GW")
+          metric_card("rd_vb_co2", "CO2 Emissions",  "Mt CO2", "smog",            DASH_COLORS$danger,   footer = "End-year"),
+          metric_card("rd_vb_pe",  "Primary Energy", "EJ",     "bolt",            DASH_COLORS$energy,   footer = "End-year"),
+          metric_card("rd_vb_ren", "Renewable Elec.", "%",     "leaf",            DASH_COLORS$renew,    footer = "Share of electricity"),
+          metric_card("rd_vb_cap", "Power Capacity", "GW",     "tower-broadcast", DASH_COLORS$capacity, footer = "End-year")
         ),
         fluidRow(
           bs4Card(width = 6, title = "CO2 Emissions Trend",    maximizable = TRUE, collapsible = FALSE, plotlyOutput("rd_co2", height = "260px")),
@@ -753,29 +967,20 @@ server <- function(input, output, session) {
       pull(value) %>% sum(na.rm = TRUE)
     if (!length(val) || is.na(val)) "N/A" else paste0(round(val, 1))
   })
-  output$vb_ren <- renderbs4ValueBox({
+  output$vb_ren <- renderText({
     d <- dat(); req(input$ov_sc, input$ov_reg, input$ov_yr)
     df <- d$secondary_elec %>%
       filter(scenario == input$ov_sc, region %in% input$ov_reg, year == input$ov_yr[2])
     tot <- sum(df$value, na.rm = TRUE); ren <- sum(df$value[df$source %in% REN_SOURCES], na.rm = TRUE)
     val_pct <- if (!tot || is.na(tot)) 0 else round(100 * ren / tot, 1)
-    val_text <- if (!tot || is.na(tot)) "N/A" else paste0(val_pct, "%")
-    
-    bs4ValueBox(
-      value = val_text,
-      subtitle = "Renewable Elec.",
-      icon = icon("leaf"),
-      color = "success",
-      footer = "share of electricity",
-      width = NULL
-    )
+    if (!tot || is.na(tot)) "N/A" else paste0(val_pct)
   })
   output$vb_cap <- renderText({
     d <- dat(); req(input$ov_sc, input$ov_reg, input$ov_yr)
     val <- d$capacity %>%
       filter(scenario == input$ov_sc, region %in% input$ov_reg, year == input$ov_yr[2]) %>%
       pull(value) %>% sum(na.rm = TRUE)
-    if (!length(val) || is.na(val) || val == 0) "N/A" else paste0(round(val, 0), " GW")
+    if (!length(val) || is.na(val) || val == 0) "N/A" else paste0(round(val, 0))
   })
 
   output$plot_ov_em <- renderPlotly({
@@ -836,7 +1041,7 @@ server <- function(input, output, session) {
       filter(scenario == input$rd_sc, region == input$rd_reg,
              gas == "CO2", is.na(domain), year == input$rd_yr[2]) %>%
       pull(value) %>% sum(na.rm = TRUE)
-    if (!length(val) || is.na(val)) "N/A" else paste0(round(val, 1), " Mt")
+    if (!length(val) || is.na(val)) "N/A" else paste0(round(val, 1))
   })
   output$rd_vb_pe <- renderText({
     d <- dat(); req(input$rd_sc, input$rd_reg, input$rd_yr)
@@ -846,29 +1051,20 @@ server <- function(input, output, session) {
       pull(value) %>% sum(na.rm = TRUE)
     if (!length(val) || is.na(val)) "N/A" else paste0(round(val, 1))
   })
-  output$rd_vb_ren <- renderbs4ValueBox({
+  output$rd_vb_ren <- renderText({
     d <- dat(); req(input$rd_sc, input$rd_reg, input$rd_yr)
     df <- d$secondary_elec %>%
       filter(scenario == input$rd_sc, region == input$rd_reg, year == input$rd_yr[2])
     tot <- sum(df$value, na.rm = TRUE); ren <- sum(df$value[df$source %in% REN_SOURCES], na.rm = TRUE)
     val_pct <- if (!tot || is.na(tot)) 0 else round(100 * ren / tot, 1)
-    val_text <- if (!tot || is.na(tot)) "N/A" else paste0(val_pct, "%")
-    
-    bs4ValueBox(
-      value = val_text,
-      subtitle = "Renewable Elec.",
-      icon = icon("leaf"),
-      color = "success",
-      footer = "share",
-      width = NULL
-    )
+    if (!tot || is.na(tot)) "N/A" else paste0(val_pct)
   })
   output$rd_vb_cap <- renderText({
     d <- dat(); req(input$rd_sc, input$rd_reg, input$rd_yr)
     val <- d$capacity %>%
       filter(scenario == input$rd_sc, region == input$rd_reg, year == input$rd_yr[2]) %>%
       pull(value) %>% sum(na.rm = TRUE)
-    if (!length(val) || is.na(val) || val == 0) "N/A" else paste0(round(val, 0), " GW")
+    if (!length(val) || is.na(val) || val == 0) "N/A" else paste0(round(val, 0))
   })
 
   # ── REGIONAL DASHBOARD CHARTS ───────────────────────────────────────────────
@@ -1131,10 +1327,10 @@ server <- function(input, output, session) {
       colorscale = list(c(0, "#1D3557"), c(0.5, "#E9C46A"), c(1, "#E63946")),
       hovertemplate = "Year: %{x}<br>Region: %{y}<br>Value: %{z:.2f}<extra></extra>") %>%
       layout(paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)",
-             font = list(color = "#E8EAF0", family = "sans"),
-             xaxis = list(title = "Year", gridcolor = "#2a2d3a"),
+             font = list(color = DASH_COLORS$text, family = "Inter, Segoe UI, Arial, sans-serif"),
+             xaxis = list(title = "Year", gridcolor = DASH_COLORS$grid, linecolor = DASH_COLORS$border),
              yaxis = list(title = NULL),
-             margin = list(t = 20, b = 50, l = 80, r = 20))
+             margin = list(t = 24, b = 52, l = 86, r = 24))
   })
 
   # ── SCATTER PLOT ────────────────────────────────────────────────────────────
