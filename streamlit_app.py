@@ -1,15 +1,18 @@
 from pathlib import Path
+from io import BytesIO
+import os
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from iamc_loader import REN_SOURCES, load_iamc_dashboard
+from iamc_loader import load_iamc_dashboard, non_overlapping_rows, overview_metrics
 
 
 BASE_DIR = Path(__file__).resolve().parent
 MIF_FILE = BASE_DIR / "reporting.mif"
+DEMO_FILE = BASE_DIR / "data" / "demo.mif"
 
 COLORS = {
     "shell": "#0B1118",
@@ -75,6 +78,13 @@ st.markdown(
       border-right: 1px solid rgba(255,255,255,.08);
     }
     section[data-testid="stSidebar"] * { color: #E8EEF5; }
+    section[data-testid="stSidebar"] .stSelectbox [role="group"],
+    section[data-testid="stSidebar"] .stSelectbox input,
+    section[data-testid="stSidebar"] .stSelectbox button {
+      background-color: #182634 !important;
+      color: #E8EEF5 !important;
+      border-color: #334556 !important;
+    }
     h1, h2, h3 { color: var(--dash-text); letter-spacing: 0; }
     h1 { font-size: 1.55rem !important; margin-bottom: .1rem; }
     h2 { font-size: 1.1rem !important; margin-top: .7rem; }
@@ -134,8 +144,9 @@ st.markdown(
 
 
 @st.cache_data(show_spinner="Reading IAMC/MIF data...")
-def get_data(path):
-    return load_iamc_dashboard(path)
+def get_data(contents):
+    """Cache selections with shares/aggregates excluded (selection revision 2)."""
+    return load_iamc_dashboard(BytesIO(contents))
 
 
 def plotly_layout(fig, height=430, legend=True):
@@ -144,11 +155,13 @@ def plotly_layout(fig, height=430, legend=True):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Inter, Segoe UI, Arial, sans-serif", color=COLORS["text"], size=12),
-        margin=dict(l=50, r=24, t=42, b=46),
+        margin=dict(l=60, r=24, t=50, b=100),
+        title=dict(x=0.01, y=0.98, yanchor="top"),
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=1.02,
+            title_text="",
+            yanchor="top",
+            y=-0.23,
             xanchor="left",
             x=0,
             bgcolor="rgba(247,249,252,.92)",
@@ -191,6 +204,25 @@ def metric_card(title, value, unit, accent, footer):
     )
 
 
+def show_metrics(data, scenario, regions, year):
+    specs = [
+        ("co2", "CO2 Emissions", "danger", "End-year sum", 1),
+        ("primary", "Primary Energy", "energy", "End-year sum", 1),
+        ("renewable", "Renewable Elec.", "renew", "Share of electricity", 1),
+        ("capacity", "Power Capacity", "capacity", "End-year total", 0),
+    ]
+    for col, (key, title, accent, footer, decimals) in zip(st.columns(4), specs):
+        with col:
+            try:
+                value, unit = overview_metrics(data, scenario, regions, year, metric=key)
+            except ValueError as exc:
+                metric_card(title, "N/A", "", COLORS[accent], "Check selected units")
+                st.warning(f"{title}: {exc}")
+                continue
+            metric_card(title, "N/A" if value is None else f"{value:,.{decimals}f}",
+                        unit, COLORS[accent], footer)
+
+
 def options(series):
     return sorted(series.dropna().unique().tolist())
 
@@ -209,17 +241,37 @@ def line_or_area(df, x, y, color=None, line_color=None, title=None, area=False, 
             fig.add_trace(go.Scatter(x=df[x], y=df[y], mode="lines+markers",
                                      line=dict(color=line_color or COLORS["accent"])))
         fig.update_layout(title=title)
+    if "unit" in df and df["unit"].nunique() == 1:
+        fig.update_yaxes(title_text=df["unit"].iloc[0])
+    fig.update_xaxes(title_text="Year" if x == "year" else x)
     return plotly_layout(fig)
 
 
-data = get_data(MIF_FILE)
+st.sidebar.markdown("## OPEN-PROM")
+st.sidebar.caption("Results Explorer")
+sources = ["Synthetic demo", "Local reporting.mif", "Upload MIF"]
+source = st.sidebar.selectbox("Data source", sources,
+                              index=1 if MIF_FILE.exists() and os.getenv("OPEN_PROM_DEMO") != "1" else 0,
+                              key="data_source")
+try:
+    if source == "Upload MIF":
+        uploaded = st.sidebar.file_uploader("IAMC/MIF file", type=["mif", "csv"])
+        if uploaded is None:
+            st.info("Upload a semicolon-delimited IAMC file, or select Synthetic demo.")
+            st.stop()
+        contents = uploaded.getvalue()
+    else:
+        contents = (DEMO_FILE if source == "Synthetic demo" else MIF_FILE).read_bytes()
+    data = get_data(contents)
+except (OSError, ValueError) as exc:
+    st.error(f"Could not load data: {exc}")
+    st.info("Select Synthetic demo to explore the dashboard with populated example data.")
+    st.stop()
 raw = data["raw"]
 scenarios = options(raw["scenario"])
 regions = options(raw["region"])
 years = options(raw["year"])
 
-st.sidebar.markdown("## OPEN-PROM")
-st.sidebar.caption("Results Explorer")
 page = st.sidebar.radio(
     "View",
     [
@@ -243,9 +295,11 @@ page = st.sidebar.radio(
 
 st.title("OPEN-PROM Results Explorer")
 st.markdown(
-    '<div class="subtle">IAMC-format scenario data translated from reporting.mif and visualized with Plotly.</div>',
+    '<div class="subtle">Explore energy transitions, emissions and regional scenario differences.</div>',
     unsafe_allow_html=True,
 )
+if source == "Synthetic demo":
+    st.info("Synthetic demo · 3 scenarios · 3 regions · 2020–2060. Illustrative data, not OPEN-PROM model results.")
 
 
 if page == "Overview":
@@ -258,40 +312,8 @@ if page == "Overview":
     selected_regions = selected_regions or [default_region]
     end_year = yr[1]
 
+    show_metrics(data, scenario, selected_regions, end_year)
     em = data["emissions"]
-    co2 = em.loc[
-        (em["scenario"] == scenario) & em["region"].isin(selected_regions)
-        & (em["gas"] == "CO2") & em["domain"].isna() & (em["year"] == end_year)
-    ]["value"].sum()
-    pe = data["primary_energy"].loc[
-        (data["primary_energy"]["scenario"] == scenario)
-        & data["primary_energy"]["region"].isin(selected_regions)
-        & (data["primary_energy"]["fuel"] == "Total")
-        & (data["primary_energy"]["year"] == end_year)
-    ]["value"].sum()
-    se_end = data["secondary_elec"].loc[
-        (data["secondary_elec"]["scenario"] == scenario)
-        & data["secondary_elec"]["region"].isin(selected_regions)
-        & (data["secondary_elec"]["year"] == end_year)
-    ]
-    total_elec = se_end["value"].sum()
-    ren = se_end.loc[se_end["source"].isin(REN_SOURCES), "value"].sum()
-    ren_share = None if total_elec == 0 else 100 * ren / total_elec
-    cap = data["capacity"].loc[
-        (data["capacity"]["scenario"] == scenario)
-        & data["capacity"]["region"].isin(selected_regions)
-        & (data["capacity"]["year"] == end_year)
-    ]["value"].sum()
-
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        metric_card("CO2 Emissions", f"{co2:,.1f}", "Mt CO2", COLORS["danger"], "End-year sum")
-    with m2:
-        metric_card("Primary Energy", f"{pe:,.1f}", "EJ", COLORS["energy"], "End-year sum")
-    with m3:
-        metric_card("Renewable Elec.", "N/A" if ren_share is None else f"{ren_share:,.1f}", "%", COLORS["renew"], "Share of electricity")
-    with m4:
-        metric_card("Power Capacity", "N/A" if cap == 0 else f"{cap:,.0f}", "GW", COLORS["capacity"], "End-year total")
 
     left, right = st.columns(2)
     co2_trend = (
@@ -307,7 +329,7 @@ if page == "Overview":
             empty_msg("No CO2 emissions data.")
         else:
             st.plotly_chart(line_or_area(co2_trend, "year", "value", line_color=COLORS["danger"],
-                                         title="CO2 Emissions", area=True), use_container_width=True)
+                                         title="CO2 Emissions", area=True), width="stretch")
 
     pe_mix = (
         data["primary_energy"].loc[
@@ -323,8 +345,9 @@ if page == "Overview":
             empty_msg("No primary energy data.")
         else:
             fig = px.area(pe_mix, x="year", y="value", color="fuel", title="Primary Energy Mix",
-                          color_discrete_map=FUEL_COLS)
-            st.plotly_chart(plotly_layout(fig), use_container_width=True)
+                          color_discrete_map=FUEL_COLS,
+                          labels={"year": "Year", "value": pe_mix["unit"].iloc[0]})
+            st.plotly_chart(plotly_layout(fig), width="stretch")
 
     tabs = st.tabs(["Electricity", "Final Energy"])
     with tabs[0]:
@@ -340,8 +363,9 @@ if page == "Overview":
             empty_msg("No electricity generation data.")
         else:
             fig = px.area(se, x="year", y="value", color="source", title="Electricity Generation Mix",
-                          color_discrete_map=FUEL_COLS)
-            st.plotly_chart(plotly_layout(fig), use_container_width=True)
+                          color_discrete_map=FUEL_COLS,
+                          labels={"year": "Year", "value": se["unit"].iloc[0]})
+            st.plotly_chart(plotly_layout(fig), width="stretch")
     with tabs[1]:
         fe = (
             data["final_energy_sector"].loc[
@@ -355,7 +379,7 @@ if page == "Overview":
             empty_msg("No final energy data.")
         else:
             fig = px.area(fe, x="year", y="value", color="sector", title="Final Energy by Sector")
-            st.plotly_chart(plotly_layout(fig), use_container_width=True)
+            st.plotly_chart(plotly_layout(fig), width="stretch")
 
 
 elif page == "Regional Dashboard":
@@ -366,35 +390,7 @@ elif page == "Regional Dashboard":
     yr = c3.slider("Year range", int(min(years)), int(max(years)), (max(min(years), 2020), min(max(years), 2060)))
     end_year = yr[1]
 
-    cols = st.columns(4)
-    co2 = data["emissions"].loc[
-        (data["emissions"]["scenario"] == scenario) & (data["emissions"]["region"] == region)
-        & (data["emissions"]["gas"] == "CO2") & data["emissions"]["domain"].isna()
-        & (data["emissions"]["year"] == end_year)
-    ]["value"].sum()
-    pe = data["primary_energy"].loc[
-        (data["primary_energy"]["scenario"] == scenario) & (data["primary_energy"]["region"] == region)
-        & (data["primary_energy"]["fuel"] == "Total") & (data["primary_energy"]["year"] == end_year)
-    ]["value"].sum()
-    se_end = data["secondary_elec"].loc[
-        (data["secondary_elec"]["scenario"] == scenario)
-        & (data["secondary_elec"]["region"] == region)
-        & (data["secondary_elec"]["year"] == end_year)
-    ]
-    total_elec = se_end["value"].sum()
-    ren_share = None if total_elec == 0 else 100 * se_end.loc[se_end["source"].isin(REN_SOURCES), "value"].sum() / total_elec
-    cap = data["capacity"].loc[
-        (data["capacity"]["scenario"] == scenario) & (data["capacity"]["region"] == region)
-        & (data["capacity"]["year"] == end_year)
-    ]["value"].sum()
-    with cols[0]:
-        metric_card("CO2 Emissions", f"{co2:,.1f}", "Mt CO2", COLORS["danger"], "End-year")
-    with cols[1]:
-        metric_card("Primary Energy", f"{pe:,.1f}", "EJ", COLORS["energy"], "End-year")
-    with cols[2]:
-        metric_card("Renewable Elec.", "N/A" if ren_share is None else f"{ren_share:,.1f}", "%", COLORS["renew"], "Share")
-    with cols[3]:
-        metric_card("Power Capacity", "N/A" if cap == 0 else f"{cap:,.0f}", "GW", COLORS["capacity"], "End-year")
+    show_metrics(data, scenario, [region], end_year)
 
     chart_specs = [
         ("CO2 Emissions Trend", data["emissions"], "gas", "CO2", "domain", None, "value", COLORS["danger"]),
@@ -412,16 +408,19 @@ elif page == "Regional Dashboard":
                 sub = sub.loc[sub[group_col] == fixed_value]
             if null_col is not None:
                 sub = sub.loc[sub[null_col].isna()]
+            if group_col == "fuel":
+                sub = sub.loc[sub["fuel"] != "Total"]
             with col:
                 if sub.empty:
                     empty_msg("No data for " + title)
                 elif fixed_value is not None:
                     fig = line_or_area(sub, "year", value_col, line_color=single_color, title=title, area=True)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 else:
                     fig = px.area(sub, x="year", y=value_col, color=group_col, title=title,
-                                  color_discrete_map=FUEL_COLS)
-                    st.plotly_chart(plotly_layout(fig, height=360), use_container_width=True)
+                                  color_discrete_map=FUEL_COLS,
+                                  labels={"year": "Year", "value": sub["unit"].iloc[0]})
+                    st.plotly_chart(plotly_layout(fig, height=360), width="stretch")
 
     ind = data["indicators"].loc[
         (data["indicators"]["scenario"] == scenario) & (data["indicators"]["region"] == region)
@@ -431,7 +430,7 @@ elif page == "Regional Dashboard":
     if not ind.empty:
         fig = px.line(ind, x="year", y="value", color="variable", facet_row="variable",
                       title="Key Indicators", markers=True)
-        st.plotly_chart(plotly_layout(fig, height=520, legend=False), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=520, legend=False), width="stretch")
 
 
 elif page in ["Primary Energy", "Electricity Mix", "Power Capacity"]:
@@ -480,7 +479,7 @@ elif page in ["Primary Energy", "Electricity Mix", "Power Capacity"]:
         empty_msg("No data for this selection.")
     else:
         fig = px.area(df, x="year", y="value", color=color, title=title, color_discrete_map=FUEL_COLS)
-        st.plotly_chart(plotly_layout(fig, height=540), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=540), width="stretch")
 
 
 elif page == "Final Energy":
@@ -504,7 +503,7 @@ elif page == "Final Energy":
     else:
         fig = px.bar(df, x="scenario", y="value", color=group_col, title=f"Final Energy by {mode} - {year}",
                      color_discrete_map=FUEL_COLS)
-        st.plotly_chart(plotly_layout(fig, height=540), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=540), width="stretch")
 
 
 elif page == "Emissions":
@@ -528,6 +527,7 @@ elif page == "Emissions":
     ].copy()
     if "All" not in selected_domains:
         df = df.loc[df["domain"].isin(selected_domains)]
+    df = non_overlapping_rows(df)
     df = df.groupby(["scenario", "region", "gas", "year", "unit"], as_index=False)["value"].sum()
     if df.empty:
         empty_msg("No emissions data.")
@@ -539,7 +539,7 @@ elif page == "Emissions":
             fig = px.line(df, x="year", y="value", color="gas", line_dash="region",
                           facet_col="scenario", markers=True, title="Emissions",
                           color_discrete_map=GAS_COLS)
-        st.plotly_chart(plotly_layout(fig, height=560), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=560), width="stretch")
 
 
 elif page == "Carbon Capture":
@@ -550,7 +550,7 @@ elif page == "Carbon Capture":
     selected_cats = c3.multiselect("Category", cats, default=cats)
     yr = c4.slider("Year range", int(min(years)), int(max(years)), (max(min(years), 2020), min(max(years), 2060)))
     df = (
-        data["ccs"].loc[
+        non_overlapping_rows(data["ccs"]).loc[
             data["ccs"]["scenario"].isin(selected_scenarios or scenarios)
             & data["ccs"]["region"].isin(selected_regions or regions)
             & data["ccs"]["category"].isin(selected_cats or cats)
@@ -563,7 +563,7 @@ elif page == "Carbon Capture":
     else:
         fig = px.line(df, x="year", y="value", color="category", facet_col="scenario",
                       markers=True, title="Carbon Capture and Storage")
-        st.plotly_chart(plotly_layout(fig, height=540), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=540), width="stretch")
 
 
 elif page == "Energy Flows":
@@ -595,7 +595,7 @@ elif page == "Energy Flows":
             ]
         )
         fig.update_layout(title="Primary to Final Energy Flows")
-        st.plotly_chart(plotly_layout(fig, height=560, legend=False), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=560, legend=False), width="stretch")
 
 
 elif page == "Heat Map":
@@ -618,7 +618,7 @@ elif page == "Heat Map":
         mat = df.pivot(index="region", columns="year", values="value")
         fig = px.imshow(mat, aspect="auto", color_continuous_scale=["#1D4E89", "#F6C85F", "#C2414B"],
                         title="Region x Year Intensity")
-        st.plotly_chart(plotly_layout(fig, height=620, legend=False), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=620, legend=False), width="stretch")
 
 
 elif page == "Scatter Plot":
@@ -645,7 +645,7 @@ elif page == "Scatter Plot":
     else:
         fig = px.scatter(df, x="x", y="y", color="region", symbol="scenario",
                          hover_data=["scenario", "region"], title=f"{x_var} vs {y_var} - {year}")
-        st.plotly_chart(plotly_layout(fig, height=560), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=560), width="stretch")
 
 
 elif page == "Regional Map":
@@ -670,7 +670,7 @@ elif page == "Regional Map":
             title="CO2 Emissions - Regional Map",
         )
         fig.update_geos(showland=True, landcolor="#F0F3F7", showcountries=True, countrycolor="#C8D2DE")
-        st.plotly_chart(plotly_layout(fig, height=600, legend=False), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=600, legend=False), width="stretch")
 
 
 elif page == "Scenario Comparison":
@@ -689,8 +689,9 @@ elif page == "Scenario Comparison":
         empty_msg("No scenario comparison data.")
     else:
         fig = px.bar(df, x="region", y="value", color="scenario", barmode="group",
-                     title=f"{variable} - {year}")
-        st.plotly_chart(plotly_layout(fig, height=560), use_container_width=True)
+                     title=f"{variable} - {year}",
+                     labels={"region": "Region", "value": df["unit"].iloc[0]})
+        st.plotly_chart(plotly_layout(fig, height=560), width="stretch")
 
 
 elif page == "Indicators":
@@ -711,7 +712,7 @@ elif page == "Indicators":
     else:
         fig = px.line(df, x="year", y="value", color="scenario", line_dash="region",
                       markers=True, title=variable)
-        st.plotly_chart(plotly_layout(fig, height=540), use_container_width=True)
+        st.plotly_chart(plotly_layout(fig, height=540), width="stretch")
 
 
 elif page == "Data Table":
@@ -728,7 +729,7 @@ elif page == "Data Table":
         df = df.loc[df["variable"].isin(selected_vars)]
     st.dataframe(
         df[["model", "scenario", "region", "variable", "unit", "year", "value"]],
-        use_container_width=True,
+        width="stretch",
         height=650,
     )
     st.download_button(

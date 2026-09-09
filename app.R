@@ -17,11 +17,28 @@ library(DT)
 library(scales)
 library(shinycssloaders)
 
-SCRIPT_DIR <- tryCatch(
-  dirname(rstudioapi::getActiveDocumentContext()$path),
-  error = function(e) getwd()
-)
+resolve_app_dir <- function(frames = sys.frames(), args = commandArgs(), working_dir = getwd()) {
+  # Shiny's sourceUTF8 keeps file_norm; base::source keeps ofile. Neither
+  # depends on which document happens to be active in the RStudio editor.
+  source_files <- unlist(lapply(rev(frames), function(frame) {
+    unlist(lapply(c("file_norm", "ofile", "file"), function(key) {
+      value <- frame[[key]]
+      if (is.character(value) && length(value) == 1L && !is.na(value)) value else NULL
+    }), use.names = FALSE)
+  }), use.names = FALSE)
+  script_files <- sub("^--file=", "", args[startsWith(args, "--file=")])
+  candidates <- c(source_files, script_files, file.path(working_dir, "app.R"))
+  candidates <- candidates[tolower(basename(candidates)) == "app.r" & file.exists(candidates)]
+  if (!length(candidates)) {
+    stop("Cannot locate app.R. Launch with shiny::runApp('/path/to/dashboard/app.R').")
+  }
+  dirname(normalizePath(candidates[[1]], winslash = "/", mustWork = TRUE))
+}
+
+SCRIPT_DIR <- resolve_app_dir()
 MIF_FILE <- file.path(SCRIPT_DIR, "reporting.mif")
+DEMO_MODE <- identical(Sys.getenv("OPEN_PROM_DEMO"), "1") || !file.exists(MIF_FILE)
+if (DEMO_MODE) MIF_FILE <- file.path(SCRIPT_DIR, "data", "demo.mif")
 
 # =============================================================================
 # GLOBALS
@@ -62,6 +79,37 @@ read_mif <- function(path) {
 
 seg <- function(variable, n)
   sapply(strsplit(variable, "\\|"), function(x) if (length(x) >= n) x[n] else NA_character_)
+
+non_overlapping_rows <- function(df) {
+  if (nrow(df) == 0) return(df)
+  df %>%
+    group_by(model, scenario, region, year, unit) %>%
+    group_modify(~ {
+      variables <- .x$variable
+      keep <- vapply(strsplit(variables, "\\|"), function(parts) {
+        if (length(parts) < 2) return(TRUE)
+        ancestors <- vapply(seq_len(length(parts) - 1), function(i)
+          paste(parts[seq_len(i)], collapse = "|"), character(1))
+        !any(ancestors %in% variables)
+      }, logical(1))
+      .x[keep, , drop = FALSE]
+    }) %>% ungroup()
+}
+
+quantities_only <- function(df) {
+  auxiliary <- str_detect(coalesce(df$variable, ""),
+    regex("\\b(share|cumulated|cumulative|budget\\w*)\\b", ignore_case = TRUE))
+  dimensionless <- str_to_lower(str_trim(coalesce(df$unit, ""))) %in%
+    c("1", "%", "percent", "fraction", "dimensionless")
+  df[!auxiliary & !dimensionless, , drop = FALSE]
+}
+
+energy_components <- function(df, label, keep_total = FALSE) {
+  excluded <- c("Renewables", "Fossil", "Non-Fossil", "Demand")
+  if (!keep_total) excluded <- c(excluded, "Total")
+  df <- quantities_only(df)
+  df[!df[[label]] %in% excluded, , drop = FALSE]
+}
 
 # =============================================================================
 # DERIVE SUB-DATASETS
@@ -137,6 +185,18 @@ derive_datasets <- function(long) {
     filter(variable %in% c("GDP|PPP", "Population", "Price|Carbon") |
              str_starts(variable, "Price\\|Carbon"))
 
+  # Preserve diagnostics in raw, but exclude them from physical-quantity views.
+  emissions <- quantities_only(emissions)
+  gross_emissions <- quantities_only(gross_emissions)
+  primary_energy <- energy_components(primary_energy, "fuel", keep_total = TRUE)
+  gic <- energy_components(gic, "fuel", keep_total = TRUE)
+  secondary_elec <- energy_components(secondary_elec, "source")
+  secondary_heat <- energy_components(secondary_heat, "source")
+  secondary_hydrogen <- energy_components(secondary_hydrogen, "source")
+  capacity <- energy_components(capacity, "tech")
+  capacity_additions <- energy_components(capacity_additions, "tech")
+  final_energy_sector <- quantities_only(final_energy_sector)
+  final_energy_carrier <- quantities_only(final_energy_carrier)
   flows    <- derive_flows(primary_energy, final_energy_sector)
   regional <- derive_regional(emissions)
 
@@ -182,14 +242,18 @@ derive_regional <- function(emissions) {
 # LOAD DATA  —  runs once at startup, cached to .rds for fast restarts
 # =============================================================================
 
-RDS_CACHE <- file.path(SCRIPT_DIR, "dashboard_cache.rds")
+RDS_CACHE <- file.path(SCRIPT_DIR, if (DEMO_MODE) "demo_cache.rds" else "dashboard_cache.rds")
+SELECTION_VERSION <- 2L
 
 APP_DATA <- local({
   # Use RDS cache if it exists and is newer than the MIF file
   if (file.exists(RDS_CACHE) && file.exists(MIF_FILE) &&
       file.mtime(RDS_CACHE) >= file.mtime(MIF_FILE)) {
-    cat("Loading from cache (dashboard_cache.rds)...\n")
-    return(readRDS(RDS_CACHE))
+    cached <- readRDS(RDS_CACHE)
+    if (identical(attr(cached, "selection_version"), SELECTION_VERSION)) {
+      cat("Loading from cache:", RDS_CACHE, "\n")
+      return(cached)
+    }
   }
   if (!file.exists(MIF_FILE)) { cat("ERROR: File not found:", MIF_FILE, "\n"); return(NULL) }
   cat("Parsing MIF file (first run or file updated)...\n")
@@ -199,6 +263,7 @@ APP_DATA <- local({
   d <- tryCatch(derive_datasets(long),
     error = function(e) { cat("ERROR:", conditionMessage(e), "\n"); NULL })
   if (!is.null(d)) {
+    attr(d, "selection_version") <- SELECTION_VERSION
     saveRDS(d, RDS_CACHE)
     cat("Cache saved to dashboard_cache.rds\n")
   }
@@ -652,6 +717,8 @@ ui <- bs4DashPage(
 
   body = bs4DashBody(
     tags$head(CUSTOM_CSS),
+    if (DEMO_MODE) tags$div(class = "alert alert-info",
+      "Synthetic demo: 3 scenarios, 3 regions, 2020–2060. Illustrative data, not OPEN-PROM model results."),
     tabItems(
 
       # ── OVERVIEW ────────────────────────────────────────────────────────────
@@ -902,7 +969,8 @@ server <- function(input, output, session) {
 
   dat <- reactive({
     validate(need(!is.null(APP_DATA),
-      paste0("Cannot load '", MIF_FILE, "'. Place reporting.mif next to app.R.")))
+      paste0("Cannot load '", MIF_FILE,
+             "'. Check that the file exists and contains numeric IAMC results; see the R console for details.")))
     APP_DATA
   })
 
@@ -1151,7 +1219,7 @@ server <- function(input, output, session) {
              gas %in% input$em_gas, year >= input$em_yr[1], year <= input$em_yr[2])
     if (!is.null(input$em_dom) && !"All" %in% input$em_dom && length(input$em_dom) > 0)
       df <- df %>% filter(domain %in% input$em_dom)
-    df <- df %>%
+    df <- non_overlapping_rows(df) %>%
       group_by(scenario, region, gas, year, unit) %>%
       summarise(value = sum(value, na.rm = TRUE), .groups = "drop")
     validate(need(nrow(df) > 0, "No data."))
@@ -1263,7 +1331,7 @@ server <- function(input, output, session) {
   # ── CCS ─────────────────────────────────────────────────────────────────────
   output$plot_ccs <- renderPlotly({
     d <- dat(); req(input$ccs_sc, input$ccs_reg, input$ccs_cat)
-    df <- d$ccs %>%
+    df <- non_overlapping_rows(d$ccs) %>%
       filter(scenario %in% input$ccs_sc, region %in% input$ccs_reg,
              category %in% input$ccs_cat, year >= input$ccs_yr[1], year <= input$ccs_yr[2]) %>%
       group_by(scenario, category, year, unit) %>%

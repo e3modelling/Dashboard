@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pandas as pd
 
 
@@ -26,9 +24,32 @@ def _seg(series, n):
     return series.str.split("|").str[n - 1]
 
 
+def quantities_only(df):
+    """Exclude diagnostic shares, budgets and cumulative series from flow views.
+
+    Keep these records in raw data for explicit variable selection elsewhere.
+    Missing units are retained so validation can flag them, not hide them.
+    """
+    auxiliary = df["variable"].str.contains(
+        r"(?i)\b(?:share|cumulated|cumulative|budget\w*)\b", na=False
+    )
+    dimensionless = df["unit"].fillna("").str.strip().str.lower().isin(
+        ["1", "%", "percent", "fraction", "dimensionless"]
+    )
+    return df.loc[~auxiliary & ~dimensionless].copy()
+
+
+def energy_components(df, label, keep_total=False):
+    """Select individual fuels/technologies, not overlapping summary categories."""
+    excluded = {"Renewables", "Fossil", "Non-Fossil", "Demand"}
+    if not keep_total:
+        excluded.add("Total")
+    df = quantities_only(df)
+    return df.loc[~df[label].isin(excluded)].copy()
+
+
 def read_mif(path):
     """Read semicolon-delimited IAMC/MIF wide data and return long IAMC rows."""
-    path = Path(path)
     raw = pd.read_csv(path, sep=";", encoding="utf-8-sig", dtype=str)
     raw.columns = [str(c).strip().lower() for c in raw.columns]
     raw = raw.loc[:, [c for c in raw.columns if c and not c.startswith("unnamed")]]
@@ -51,7 +72,70 @@ def read_mif(path):
     long["year"] = long["year"].astype(int)
     long["value"] = pd.to_numeric(long["value"], errors="coerce")
     long = long.dropna(subset=["value"]).copy()
+    if long.empty:
+        raise ValueError("No numeric observations found in the IAMC file.")
     return long
+
+
+def non_overlapping_rows(df):
+    """Prefer reported parents over descendants within each observation group.
+
+    Apply domain filters first. A reported zero parent still takes precedence;
+    missing parents allow available descendants through, without imputing totals.
+    """
+    if df.empty:
+        return df.copy()
+    keys = ["model", "scenario", "region", "year", "unit"]
+    pieces = []
+    for _, group in df.groupby(keys, dropna=False, sort=False):
+        variables = set(group["variable"])
+        keep = group["variable"].map(
+            lambda v: not any(
+                "|".join(v.split("|")[:i]) in variables
+                for i in range(1, len(v.split("|")))
+            )
+        )
+        pieces.append(group.loc[keep])
+    return pd.concat(pieces)
+
+
+def overview_metrics(data, scenario, regions, year, *, metric=None):
+    """Calculate KPIs, or one named KPI so its error cannot hide other cards."""
+    def selected(name):
+        df = data[name]
+        return df.loc[(df["scenario"] == scenario) & df["region"].isin(regions)
+                      & (df["year"] == year)]
+
+    def total(df):
+        if df.empty:
+            return None, ""
+        units = df["unit"].dropna().unique()
+        if len(units) != 1 or df["unit"].isna().any() or df["unit"].str.strip().eq("").any():
+            detail = ", ".join(str(unit) for unit in units) or "none"
+            raise ValueError(f"KPI selection contains mixed or missing units (found: {detail}).")
+        return df["value"].sum(), units[0]
+
+    def calculate(key):
+        if key == "co2":
+            emissions = selected("emissions")
+            # A cumulative stock or a budget is never an annual emissions total.
+            return total(emissions.loc[emissions["variable"] == "Emissions|CO2"])
+        if key == "primary":
+            primary = selected("primary_energy")
+            return total(primary.loc[primary["variable"] == "Primary Energy"])
+        if key == "capacity":
+            return total(selected("capacity"))
+        if key == "renewable":
+            electricity = selected("secondary_elec")
+            generation, _ = total(electricity)
+            renewable = electricity.loc[electricity["source"].isin(REN_SOURCES), "value"].sum()
+            share = None if generation is None or generation <= 0 else 100 * renewable / generation
+            return share, "%"
+        raise ValueError(f"Unknown KPI: {key}")
+
+    if metric is not None:
+        return calculate(metric)
+    return {key: calculate(key) for key in ["co2", "primary", "capacity", "renewable"]}
 
 
 def derive_flows(primary_energy, final_energy_sector):
@@ -201,6 +285,19 @@ def derive_datasets(long):
         | long["variable"].str.startswith("Price|Carbon", na=False)
     ].copy()
 
+    # Keep raw records available for the table, scatter and variable-comparison
+    # views, but never mix diagnostic indicators into physical quantity stacks.
+    emissions = quantities_only(emissions)
+    gross_emissions = quantities_only(gross_emissions)
+    primary_energy = energy_components(primary_energy, "fuel", keep_total=True)
+    gic = energy_components(gic, "fuel", keep_total=True)
+    secondary_elec = energy_components(secondary_elec, "source")
+    secondary_heat = energy_components(secondary_heat, "source")
+    secondary_hydrogen = energy_components(secondary_hydrogen, "source")
+    capacity = energy_components(capacity, "tech")
+    capacity_additions = energy_components(capacity_additions, "tech")
+    final_energy_sector = quantities_only(final_energy_sector)
+    final_energy_carrier = quantities_only(final_energy_carrier)
     flows = derive_flows(primary_energy, final_energy_sector)
     regional = derive_regional(emissions)
 
