@@ -1,0 +1,4 @@
+.venv/
+*.mif
+*.pyc
+*.rds
