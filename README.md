@@ -228,17 +228,6 @@ Run the Shiny path-resolution regressions from the repository root with `Rscript
 
 Verified locally with Python 3.10.4, pandas 2.3.3, Streamlit 1.63.0, and Plotly 7.0.0. These are the tested versions, not a lockfile. The automated suite covers the Python implementation; it does not validate the R application's runtime.
 
-## Refresh the screenshots
-
-Install the optional browser automation dependency and run the capture script:
-
-```bash
-python -m pip install playwright
-python scripts/capture_screenshots.py
-```
-
-On Windows, the script uses installed Microsoft Edge. If Edge is unavailable, install Playwright's Chromium first with `python -m playwright install chromium`. The script starts a temporary server bound to localhost, forces synthetic demo mode, captures **Overview** and **Scenario Comparison**, and stops the server. No local model results appear in the screenshots.
-
 ## Repository structure
 
 - `streamlit_app.py` - Streamlit interface and Plotly visualizations
